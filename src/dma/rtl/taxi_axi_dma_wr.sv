@@ -20,7 +20,9 @@ module taxi_axi_dma_wr #
     // Maximum AXI burst length to generate
     parameter AXI_MAX_BURST_LEN = 16,
     // Enable support for unaligned transfers
-    parameter logic UNALIGNED_EN = 1'b1
+    parameter logic UNALIGNED_EN = 1'b1,
+    // Value to propagate for cache signals
+    parameter logic AWCACHE_VAL = 4'b0011
 )
 (
     input  wire logic         clk,
@@ -240,7 +242,7 @@ assign m_axi_wr.awlen = m_axi_awlen_reg;
 assign m_axi_wr.awsize = 3'(AXI_BURST_SIZE);
 assign m_axi_wr.awburst = 2'b01;
 assign m_axi_wr.awlock = 1'b0;
-assign m_axi_wr.awcache = 4'b0011;
+assign m_axi_wr.awcache = AWCACHE_VAL;
 assign m_axi_wr.awprot = 3'b010;
 assign m_axi_wr.awvalid = m_axi_awvalid_reg;
 assign m_axi_wr.bready = m_axi_bready_reg;
