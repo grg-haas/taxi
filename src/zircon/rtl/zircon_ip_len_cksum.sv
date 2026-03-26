@@ -84,6 +84,8 @@ logic [ID_W-1:0] m_axis_meta_id_reg = '0;
 logic [DEST_W-1:0] m_axis_meta_dest_reg = '0;
 logic [USER_W-1:0] m_axis_meta_user_reg = '0;
 
+wire stall = m_axis_meta_valid_reg && !m_axis_meta.tready;
+
 assign m_axis_pkt.tdata = s_axis_pkt.tdata;
 assign m_axis_pkt.tkeep = s_axis_pkt.tkeep;
 assign m_axis_pkt.tstrb = s_axis_pkt.tstrb;
@@ -103,8 +105,8 @@ end else begin
     assign m_axis_pkt.tuser = '0;
 end
 assign m_axis_pkt.tlast = s_axis_pkt.tlast;
-assign m_axis_pkt.tvalid = s_axis_pkt.tvalid;
-assign s_axis_pkt.tready = m_axis_pkt.tready;
+assign m_axis_pkt.tvalid = s_axis_pkt.tvalid && !stall;
+assign s_axis_pkt.tready = m_axis_pkt.tready && !stall;
 
 assign m_axis_meta.tdata = {m_axis_meta_csum_reg, m_axis_meta_len_reg};
 assign m_axis_meta.tkeep = '1;
@@ -135,9 +137,9 @@ for (genvar j = 0; j < KEEP_W; j = j + 1) begin
 end
 
 always_ff @(posedge clk) begin
-    sum_valid_reg[0] <= 1'b0;
+    if (!stall) sum_valid_reg[0] <= 1'b0;
 
-    if (s_axis_pkt.tvalid && s_axis_pkt.tready) begin
+    if (s_axis_pkt.tvalid && s_axis_pkt.tready && !stall) begin
         for (integer i = 0; i < DATA_W/8/4; i = i + 1) begin
             sum_reg[0][i*17 +: 17] <= {pkt_data_masked[(4*i+0)*8 +: 8], pkt_data_masked[(4*i+1)*8 +: 8]} + {pkt_data_masked[(4*i+2)*8 +: 8], pkt_data_masked[(4*i+3)*8 +: 8]};
             len_reg[0][i*3 +: 3] <= 3'(s_axis_pkt.tkeep[(4*i+0)]) + 3'(s_axis_pkt.tkeep[(4*i+1)]) + 3'(s_axis_pkt.tkeep[(4*i+2)]) + 3'(s_axis_pkt.tkeep[(4*i+3)]);
@@ -173,9 +175,9 @@ end
 for (genvar l = 1; l < LEVELS-1; l = l + 1) begin
 
     always_ff @(posedge clk) begin
-        sum_valid_reg[l] <= 1'b0;
+        if (!stall) sum_valid_reg[l] <= 1'b0;
 
-        if (sum_valid_reg[l-1]) begin
+        if (sum_valid_reg[l-1] && !stall) begin
             for (integer i = 0; i < DATA_W/8/4/2**l; i = i + 1) begin
                 sum_reg[l][i*(17+l) +: (17+l)] <= sum_reg[l-1][(i*2+0)*(17+l-1) +: (17+l-1)] + sum_reg[l-1][(i*2+1)*(17+l-1) +: (17+l-1)];
                 len_reg[l][i*(3+l) +: (3+l)] <= len_reg[l-1][(i*2+0)*(3+l-1) +: (3+l-1)] + len_reg[l-1][(i*2+1)*(3+l-1) +: (3+l-1)];
@@ -195,19 +197,19 @@ for (genvar l = 1; l < LEVELS-1; l = l + 1) begin
 end
 
 always_ff @(posedge clk) begin
-    m_axis_meta_valid_reg <= 1'b0;
+    if (!stall) m_axis_meta_valid_reg <= 1'b0;
 
     sum_acc_temp = sum_reg[LEVELS-2][16+LEVELS-1-1:0] + (16+LEVELS)'(sum_acc_reg);
     sum_acc_temp = (16+LEVELS)'(sum_acc_temp[15:0] + 16'(sum_acc_temp >> 16));
     sum_acc_temp = (16+LEVELS)'(sum_acc_temp[15:0] + 16'(sum_acc_temp[16]));
 
-    m_axis_meta_len_reg <= len_acc_reg + 16'(len_reg[LEVELS-2][3+LEVELS-1-1:0]);
-    m_axis_meta_csum_reg <= sum_acc_temp[15:0];
-    m_axis_meta_id_reg <= id_reg[LEVELS-2];
-    m_axis_meta_dest_reg <= dest_reg[LEVELS-2];
-    m_axis_meta_user_reg <= user_reg[LEVELS-2];
+    if (sum_valid_reg[LEVELS-2] && !stall) begin
+        m_axis_meta_len_reg <= len_acc_reg + 16'(len_reg[LEVELS-2][3+LEVELS-1-1:0]);
+        m_axis_meta_csum_reg <= sum_acc_temp[15:0];
+        m_axis_meta_id_reg <= id_reg[LEVELS-2];
+        m_axis_meta_dest_reg <= dest_reg[LEVELS-2];
+        m_axis_meta_user_reg <= user_reg[LEVELS-2];
 
-    if (sum_valid_reg[LEVELS-2]) begin
         if (sum_last_reg[LEVELS-2]) begin
             m_axis_meta_valid_reg <= 1'b1;
             sum_acc_reg <= '0;
@@ -221,6 +223,7 @@ always_ff @(posedge clk) begin
     if (rst) begin
         m_axis_meta_valid_reg <= 1'b0;
         sum_acc_reg <= '0;
+        len_acc_reg <= '0;
     end
 end
 
